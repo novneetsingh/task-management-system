@@ -11,11 +11,11 @@ const {
   getNextTask,
 } = require("../controllers/taskController");
 
-router.post("/", auth, createTask);
-router.get("/", auth, getTasks);
-router.get("/next", auth, getNextTask);
-router.get("/:id", auth, getTask);
-router.put("/:id", auth, updateTask);
-router.delete("/:id", auth, deleteTask);
+router.post("/create", auth, createTask);
+router.get("/get-all", auth, getTasks);
+router.get("/get-next", auth, getNextTask);
+router.get("/get-task/:id", auth, getTask);
+router.put("/update/:id", auth, updateTask);
+router.delete("/delete/:id", auth, deleteTask);
 
 module.exports = router;
