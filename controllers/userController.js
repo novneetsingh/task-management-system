@@ -77,19 +77,3 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
-// login as a guest user
-exports.loginAsGuest = async (req, res) => {
-  try {
-    const token = jwt.sign({}, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    }); // create a guest user token
-
-    res.status(200).json({
-      message: "Guest user logged in successfully",
-      token,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
