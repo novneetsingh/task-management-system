@@ -19,6 +19,8 @@ const taskQueue = new PriorityQueue(taskComparator);
 const initializeTaskQueue = async () => {
   try {
     taskQueue.clear();
+
+    // get all pending tasks from the database and sort them by createdAt descending
     const tasks = await Task.find({ status: "pending" }).sort({
       createdAt: -1,
     });
@@ -38,24 +40,14 @@ const initializeTaskQueue = async () => {
 
 // Add a task to the queue
 const addTaskToQueue = (task) => {
+  console.log("Adding task to queue:", task);
   taskQueue.enqueue(task);
 };
 
 // Remove a task from the queue by rebuilding it without the task
 const removeTaskFromQueue = (taskId) => {
-  const tempQueue = new PriorityQueue(taskComparator);
-
-  while (!taskQueue.isEmpty()) {
-    const item = taskQueue.dequeue();
-    if (item._id.toString() !== taskId.toString()) {
-      tempQueue.enqueue(item);
-    }
-  }
-
-  // Replace the original queue with the updated one
-  while (!tempQueue.isEmpty()) {
-    taskQueue.enqueue(tempQueue.dequeue());
-  }
+  console.log("Removing task from queue:", taskId);
+  taskQueue.remove((task) => task._id.toString() === taskId.toString());
 };
 
 module.exports = {

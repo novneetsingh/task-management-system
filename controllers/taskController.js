@@ -1,5 +1,6 @@
 const Task = require("../models/Task");
-const { redisClient } = require("../redis");
+const User = require("../models/User");
+const { redisClient } = require("../config/redis");
 const {
   taskQueue,
   addTaskToQueue,
@@ -23,7 +24,7 @@ exports.createTask = async (req, res) => {
   try {
     const { title, description, priority } = req.body;
 
-    if (!title || !description || !priority) {
+    if (!title || !description) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
@@ -31,62 +32,23 @@ exports.createTask = async (req, res) => {
       title,
       description,
       priority,
-      createdBy: req.user._id,
+      createdBy: req.user.id,
+    });
+
+    // add task to user's task list
+    await User.findByIdAndUpdate(req.user.id, {
+      $push: { tasks: task._id },
     });
 
     // Add task to the priority queue for scheduling
     addTaskToQueue(task);
 
     // Clear cached tasks for this user (invalidate cache)
-    await clearUserCache(req.user._id.toString());
+    await clearUserCache(req.user.id.toString());
 
     res.status(201).json(task);
   } catch (error) {
     res.status(400).json({ message: error.message });
-  }
-};
-
-// Get all tasks with pagination and filtering using Redis cache
-exports.getTasks = async (req, res) => {
-  try {
-    const { page = 1, limit = 10, status, priority } = req.query;
-    const skip = (page - 1) * limit;
-    const userId = req.user._id.toString();
-
-    // Build a cache key specific for this user and query
-    const cacheKey = `tasks:${userId}:${page}:${limit}:${status || ""}:${
-      priority || ""
-    }`;
-
-    // Try to retrieve the cached result from Redis
-    const cachedResult = await redisClient.get(cacheKey);
-    if (cachedResult) {
-      return res.json(JSON.parse(cachedResult));
-    }
-
-    // Build query based on user and optional filters
-    const query = { createdBy: userId };
-    if (status) query.status = status;
-    if (priority) query.priority = priority;
-
-    const tasks = await Task.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Task.countDocuments(query);
-    const result = {
-      tasks,
-      totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page),
-    };
-
-    // Cache the result in Redis with an expiration of 1 hour (3600 seconds)
-    await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
-
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
 };
 
@@ -95,7 +57,7 @@ exports.getTask = async (req, res) => {
   try {
     const task = await Task.findOne({
       _id: req.params.id,
-      createdBy: req.user._id,
+      createdBy: req.user.id,
     });
     if (!task) return res.status(404).json({ message: "Task not found" });
     res.json(task);
@@ -109,7 +71,7 @@ exports.updateTask = async (req, res) => {
   try {
     const task = await Task.findOne({
       _id: req.params.id,
-      createdBy: req.user._id,
+      createdBy: req.user.id,
     });
 
     if (!task) return res.status(404).json({ message: "Task not found" });
@@ -128,7 +90,7 @@ exports.updateTask = async (req, res) => {
     addTaskToQueue(task);
 
     // Invalidate cached tasks for this user
-    await clearUserCache(req.user._id.toString());
+    await clearUserCache(req.user.id.toString());
 
     res.json(task);
   } catch (error) {
@@ -141,15 +103,20 @@ exports.deleteTask = async (req, res) => {
   try {
     const task = await Task.findOneAndDelete({
       _id: req.params.id,
-      createdBy: req.user._id,
+      createdBy: req.user.id,
     });
     if (!task) return res.status(404).json({ message: "Task not found" });
+
+    // Remove the deleted task from the user's task list
+    await User.findByIdAndUpdate(req.user.id, {
+      $pull: { tasks: task._id },
+    });
 
     // Remove the deleted task from the priority queue
     removeTaskFromQueue(task._id);
 
     // Invalidate cached tasks for this user
-    await clearUserCache(req.user._id.toString());
+    await clearUserCache(req.user.id.toString());
 
     res.json({ message: "Task deleted successfully" });
   } catch (error) {
@@ -157,14 +124,56 @@ exports.deleteTask = async (req, res) => {
   }
 };
 
-// Get the next highest priority task (without removing it from the queue)
-exports.getNextTask = async (req, res) => {
+// Get all tasks with pagination and filtering from the priority queue
+exports.getTasks = async (req, res) => {
   try {
-    if (taskQueue.isEmpty()) {
-      return res.status(404).json({ message: "No tasks in queue" });
+    const { page = 1, limit = 10, priority } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // make redis key for the tasks
+    const tasksKey = `tasks:${req.user.id}:${pageNum}:${limitNum}:${priority}`;
+
+    // check if the tasks are cached
+    const cachedTasks = await redisClient.get(tasksKey);
+    if (cachedTasks) {
+      return res.json(JSON.parse(cachedTasks));
     }
-    const nextTask = taskQueue.front();
-    res.json(nextTask);
+
+    // convert the queue to an array
+    const taskArray = taskQueue.toArray();
+
+    // Array to hold tasks that pass the filters
+    const tasksToReturn = [];
+    const totalTasks = taskArray.length; // Total number of tasks in the queue
+
+    // Iterate through the entire queue without losing any tasks
+    for (let i = 0; i < totalTasks; i++) {
+      const task = taskArray[i];
+
+      // check if the task passes the filters
+      if (priority && task.priority !== priority) {
+        // if the task does not pass the filters, skip it
+        continue;
+      }
+
+      // add the task to the return array
+      tasksToReturn.push(task);
+    }
+
+    // Implement pagination on the filtered tasks
+    const paginatedTasks = tasksToReturn.slice(skip, skip + limitNum);
+    const totalPages = Math.ceil(tasksToReturn.length / limitNum);
+
+    // cache the tasks for 1 hour
+    await redisClient.setEx(tasksKey, 3600, JSON.stringify(paginatedTasks));
+
+    res.json({
+      tasks: paginatedTasks,
+      totalPages,
+      currentPage: pageNum,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
