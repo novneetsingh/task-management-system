@@ -8,7 +8,7 @@ const userRoutes = require("./routes/userRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 
 // Import task queue and run initializer
-const { initializeTaskQueue } = require("./utils/priorityQueue");
+const { initializeTaskQueue } = require("./utils/taskQueue");
 
 // Define port number
 const PORT = process.env.PORT || 3000;

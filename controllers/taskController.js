@@ -4,7 +4,7 @@ const {
   taskQueue,
   addTaskToQueue,
   removeTaskFromQueue,
-} = require("../utils/priorityQueue");
+} = require("../utils/taskQueue");
 
 // Clear all cached task keys for a given user
 const clearUserCache = async (userId) => {
@@ -18,7 +18,7 @@ const clearUserCache = async (userId) => {
   }
 };
 
-// Create a new task
+// Create a task
 exports.createTask = async (req, res) => {
   try {
     const { title, description, priority } = req.body;
